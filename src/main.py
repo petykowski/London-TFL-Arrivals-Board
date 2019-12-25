@@ -133,8 +133,8 @@ try:
   displayHeight = 64
   is_train_approaching = False
   upcoming_arrivals = []
-  font_regular = makeFont('London Underground Regular.ttf', 12)
-  font_bold = makeFont('London Underground Bold.ttf', 12)
+  font_regular = makeFont('London Underground Regular.ttf', 9)
+  font_bold = makeFont('London Underground Bold.ttf', 9)
   last_refresh_time = time.time() - constant.REFRESH_INTERVAL
 
   device = get_device()
