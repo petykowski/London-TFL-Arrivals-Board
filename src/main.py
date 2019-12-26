@@ -1,5 +1,5 @@
 import config
-import constant
+from constant import *
 from helper import get_device
 from PIL import ImageFont, Image
 import requests
@@ -11,18 +11,21 @@ import math
 from luma.core.render import canvas
 # from luma.core.virtual import viewport, snapshot
 
-url = 'https://api.tfl.gov.uk/Line/central/Arrivals/940GZZLULVT'
+url = 'https://api.tfl.gov.uk/Line/district,hammersmith-city/Arrivals/940GZZLUWPL'
 payload = {'app_id': config.app_id, 'app_key': config.app_key, 'direction': 'inbound'}
 
 
 class trainArrival:
+  '''
+  Represents an arriving train for the given station and direction.
+  '''
 
-    def __init__(self, item):
-      self.id = item['id']
-      self.timeOfExpiration = item['timeToStation'] + 60
-      self.timeOfExpectedArrival = time.time() + item['timeToStation']
-      self.timeToStation = item['timeToStation']
-      self.destinationName = item['destinationName']
+  def __init__(self, item):
+    self.id = item['id']
+    self.timeOfExpiration = item['timeToStation'] + 60
+    self.timeOfExpectedArrival = time.time() + item['timeToStation']
+    self.timeToStation = item['timeToStation']
+    self.destinationName = item['towards']
 
 
 def query_TFL(url, params):
@@ -42,7 +45,7 @@ def query_TFL(url, params):
         },
         {
           "id" : 3,
-          "timeToStation" : 448,
+          "timeToStation" : 684,
           "destinationName" : 'Ealing Broadway Underground Station'
         }
       ]
@@ -55,53 +58,82 @@ def query_TFL(url, params):
     raise ValueError('Error Communicating with TFL')
 
 
-def format_time_component(timeToStation):
-  # Returns the time component for the arriving train. This function
-  # accepts an integer 'timeToStation' (in seconds) which represents
-  # the arrival time for the given train.
+def setDisplayStyle(style=STYLE_OLD):
+  '''
+  Returns the appropriate fonts for the given display style.
+  NOTE: All style options can be found in the file, constant.py
+  '''
+
+  if style == STYLE_OLD:
+    font_regular = generate_Font('London Underground Regular.ttf', 9)
+    font_bold = generate_Font('London Underground Bold.ttf', 9)
+  else:
+    font_regular = generate_Font('Dot Matrix Regular.ttf', 9)
+    font_bold = generate_Font('Dot Matrix Bold.ttf', 9)
+
+  return font_regular, font_bold
+
+
+def build_arrival_time(display, timeToStation, row_num):
+  '''
+  Returns the time component for the arriving train. This function
+  accepts an integer 'timeToStation' (in seconds) which represents
+  the arrival time for the given train.
+  '''
+
+  timeToStation = timeToStation - time.time()
+  arrival_time = ''
+  arrival_text = ''
 
   if timeToStation >= 60:
     # Round up to the next minute
-    return str(math.ceil(timeToStation/60)) + ' mins'
+    arrival_time = str(math.ceil(timeToStation/60))
+    arrival_text = ' mins'
   elif timeToStation < 60 and timeToStation > 30:
     # Round up to 1 minute
-    return str(math.ceil(timeToStation/60)) + ' min'
+    arrival_time = str(math.ceil(timeToStation/60))
+    arrival_text = ' min'
   else:
     # Return an empty string indicating that train is due
-    is_train_approaching = True
-    return ''
+    arrival_text = ''
+
+  w_time, h_time = display.textsize(arrival_time, font_regular)
+  w_text, h_text = display.textsize(' mins', font_regular)
+
+  display.text((DISPLAY_WIDTH-(w_time + w_text), ((row_num-1) * 14)), text=arrival_time + arrival_text, font=font_regular, fill="yellow")
 
 
-def format_destination_component(destinationName):
-  return destinationName[0:-20]
+def build_clock(display):
+  '''
+  Returns a clock which displays the current time . This function 
+  will only return a colon ":" between the time numbers every 
+  half second.
+  '''
 
-def generate_current_time(display, width, height):
-  # This function will only return a colon ":"
-  # between the time numbers every other second
-  # TODO: The actual departure board will flash colons every half second.
-  t = time.localtime()
+  current_time_local = time.localtime()
+  current_time_milli = current_milli_time()
 
-  if current_milli_time() > 500:
-    current_time = time.strftime("%H:%M:%S", t)
+  if current_time_milli > 500:
+    current_time = time.strftime("%H:%M:%S", current_time_local)
   else:
-    current_time = time.strftime("%H %M %S", t)
-  display.text((((width-constant.DISPLAY_TIME_WIDTH)/2), (height-constant.DISPLAY_TIME_HEIGHT)), text=current_time, font=font_bold, fill="yellow")
+    current_time = time.strftime("%H %M %S", current_time_local)
+
+  w1, h1 = display.textsize(current_time, font_bold)
+  display.text((((DISPLAY_WIDTH-w1)/2), (DISPLAY_HEIGHT-h1)), text=current_time, font=font_bold, fill="yellow")
 
 
 def generate_arrival_row(display, arrival, row_num):
-  global scroll_index
-  scroll_index += 1
   display.text((0, ((row_num-1) * 14)), text=str(row_num), font=font_regular, fill="yellow")
-  display.text((14, ((row_num-1) * 14)), text=format_destination_component(arrival.destinationName), font=font_regular, fill="yellow")
-  w1, h1 = display.textsize(format_time_component(arrival.timeOfExpectedArrival - time.time()), font_regular)
-  display.text((displayWidth - 46, ((row_num-1) * 14)), text=format_time_component(arrival.timeOfExpectedArrival - time.time()), font=font_regular, fill="yellow")
+  display.text((10, ((row_num-1) * 14)), text=arrival.destinationName, font=font_regular, fill="yellow")
+  build_arrival_time(display, arrival.timeOfExpectedArrival, row_num)
 
-def generate_departure_board(device, width, height, data):
+
+def generate_departure_board(device, data):
 
   if not data:
     with canvas(device) as display:
       display.text((0, 0), text="Welcome to Aldgate East Station", font=font_regular, fill="yellow")
-      display.text(((width/2), (height-14)), text=current_time, font=font_regular, fill="yellow")
+      display.text(((DISPLAY_WIDTH/2), (DISPLAY_HEIGHT-14)), text=current_time, font=font_regular, fill="yellow")
   else:
     row_num = 0
     with canvas(device) as display:
@@ -111,10 +143,14 @@ def generate_departure_board(device, width, height, data):
         generate_arrival_row(display, arrival, row_num)
 
       # Generate Time
-      generate_current_time(display, width, height)
+      build_clock(display)
 
 
-def makeFont(name, size):
+def generate_Font(name, size):
+  '''
+  Returns an ImageFont for use when displaying text on the device.
+  '''
+
   font_path = os.path.abspath(
       os.path.join(
           os.path.abspath(__file__ + "/../../assets/"),
@@ -126,23 +162,20 @@ def makeFont(name, size):
 
 
 try:
-  global displayWidth, displayHeight, is_train_approaching, current_milli_time, scroll_index
-  scroll_index = 1
   current_milli_time = lambda: int(str(round(time.time() * 1000))[-3:])
-  displayWidth = 256
-  displayHeight = 64
   is_train_approaching = False
   upcoming_arrivals = []
-  font_regular = makeFont('London Underground Regular.ttf', 9)
-  font_bold = makeFont('London Underground Bold.ttf', 9)
-  last_refresh_time = time.time() - constant.REFRESH_INTERVAL
+
+  font_regular, font_bold = setDisplayStyle()
+
+  last_refresh_time = time.time() - REFRESH_INTERVAL
 
   device = get_device()
 
   while True:
 
     # Refresh Data when TTL Expired
-    if (time.time() - last_refresh_time >= constant.REFRESH_INTERVAL):
+    if (time.time() - last_refresh_time >= REFRESH_INTERVAL):
 
       json = query_TFL(url, payload)
       sortedJson = sorted(json, key=lambda k: k['timeToStation'])
@@ -153,7 +186,7 @@ try:
 
       last_refresh_time = time.time()
 
-    generate_departure_board(device, displayWidth, displayHeight, upcoming_arrivals[:3])
+    generate_departure_board(device, upcoming_arrivals[:3])
     time.sleep(.1)
 
 
