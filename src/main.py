@@ -88,7 +88,7 @@ def build_arrival_time(display, arrival, row_num):
     arrival_time = str(math.ceil(timeToStation/60))
     arrival_text = ' mins'
   elif timeToStation < 60 and timeToStation > 30:
-    # Round up to 1 minute
+    # Round up to 1 minute 
     arrival_time = str(math.ceil(timeToStation/60))
     arrival_text = ' min'
   else:
@@ -144,11 +144,11 @@ def generate_departure_board(device, data):
   else:
     row_num = 1
     with canvas(device) as display:
-
       for arrival in data:
         generate_arrival_row(display, arrival, row_num)
 
-        if arrival.timeOfExpectedArrival - time.time() < 30:
+        # Indicates that the train is approaching if arrival is within 15 seconds.
+        if arrival.timeOfExpectedArrival - time.time() < 15:
           arrival.isTrainApproaching = True
 
         row_num += 1
