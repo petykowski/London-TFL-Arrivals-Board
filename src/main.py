@@ -2,6 +2,8 @@ import config
 from constant import *
 from helper import get_device
 from PIL import ImageFont, Image
+from datetime import datetime
+from pytz import timezone
 import requests
 import json
 import time
@@ -117,13 +119,13 @@ def build_clock(display):
   half second.
   '''
 
-  current_time_local = time.localtime()
+  current_time_in_london = datetime.now(timezone('Europe/London'))
   current_time_milli = current_milli_time()
 
   if current_time_milli > 500:
-    current_time = time.strftime("%H:%M:%S", current_time_local)
+    current_time = current_time_in_london.strftime("%H:%M:%S")
   else:
-    current_time = time.strftime("%H %M %S", current_time_local)
+    current_time = current_time_in_london.strftime("%H %M %S")
 
   w1, h1 = display.textsize(current_time, font_bold)
   display.text((((DISPLAY_WIDTH-w1)/2), (DISPLAY_HEIGHT-h1)), text=current_time, font=font_bold, fill="yellow")
