@@ -34,7 +34,7 @@ def query_TFL(url, params):
         {
           "id" : 1,
           "timeToStation" : 45,
-          "towards" : 'Wimbledon'
+          "towards" : 'Queen\'s Park'
         },
         {
           "id" : 2,
