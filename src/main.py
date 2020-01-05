@@ -1,17 +1,30 @@
-import config
-from constant import *
-from helper import get_device
-from PIL import ImageFont, Image
-from datetime import datetime
-from pytz import timezone
-import requests
-import json
-import time
 import os
 import sys
 import math
+import json
+import time
+import config
+import requests
+from constant import *
+from pytz import timezone
+from datetime import datetime
+from helper import get_device
+from PIL import ImageFont, Image
 from luma.core.render import canvas
-# from luma.core.virtual import viewport, snapshot
+
+
+class undergroundStation:
+  '''
+  Represents a Station on the TFL Underground network.
+  '''
+
+  def __init__(self, item):
+    self.id = item['matches'][0]['id']
+    self.stationName = item['matches'][0]['name']
+    self.availableLines = []
+
+  def addAvailableLines(self, lines):
+    self.availableLines = lines
 
 
 class trainArrival:
@@ -29,33 +42,49 @@ class trainArrival:
 
 
 def query_TFL(url, params):
+  '''
+  Wrapper function for querying the TFL API
+  '''
+
   response = requests.get(url, params=params)
+
+
   if response.status_code == 200:
     if not response.json():
-      debug_while_down = [
-        {
-          "id" : 1,
-          "timeToStation" : 45,
-          "towards" : 'Queen\'s Park'
-        },
-        {
-          "id" : 2,
-          "timeToStation" : 125,
-          "towards" : 'Richmond'
-        },
-        {
-          "id" : 3,
-          "timeToStation" : 684,
-          "towards" : 'Ealing Broadway'
-        }
-      ]
       print('Nothing was returned from TFL')
-      return debug_while_down
     else:
       print('Success. Returning JSON')
-      return response.json()
+
+    return response.json()
+
   else:
     raise ValueError('Error Communicating with TFL')
+
+def query_for_station_data(query_station_string):
+  '''
+  Returns a populated undergroundStation class object based on the 
+  requested station name.
+  NOTE: query_station_string is currently hard coded in the main
+  try() call.
+  '''
+
+  query_station_url = 'https://api.tfl.gov.uk/StopPoint/Search'
+  query_station_payload = {'query': query_station_string, 'modes': 'tube', 'app_id': config.app_id, 'app_key': config.app_key}
+  station_response = query_TFL(query_station_url, query_station_payload)
+
+  station = undergroundStation(station_response)
+
+  query_lines_url = 'https://api.tfl.gov.uk/StopPoint/ServiceTypes'
+  query_lines_payload = {'id': station.id, 'app_id': config.app_id, 'app_key': config.app_key}
+  lines_response = query_TFL(query_lines_url, query_lines_payload)
+
+  available_lines_at_station = []
+  for line in lines_response:
+    available_lines_at_station.append(line['lineName'])
+
+  station.addAvailableLines(available_lines_at_station)
+
+  return station
 
 
 def setDisplayStyle(style=STYLE_STANDARD):
@@ -137,12 +166,18 @@ def generate_arrival_row(display, arrival, row_num):
   build_arrival_time(display, arrival, row_num)
 
 
-def generate_departure_board(device, data):
+def generate_departure_board(device, data, station):
 
   if not data:
+
+    welcome_msg = "Welcome to " + station.stationName
+
     with canvas(device) as display:
-      display.text((0, 0), text="Welcome to Aldgate East Station", font=font_regular, fill="yellow")
-      display.text(((DISPLAY_WIDTH/2), (DISPLAY_HEIGHT-14)), text=current_time, font=font_regular, fill="yellow")
+      w1, h1 = display.textsize(welcome_msg, font_regular)
+      display.text((((DISPLAY_WIDTH-w1)/2), 0), text=welcome_msg, font=font_regular, fill="yellow")
+
+      # Generate Time
+      build_clock(display)
   else:
     row_num = 1
     with canvas(device) as display:
@@ -176,19 +211,22 @@ def generate_font(name, size):
   )
   return ImageFont.truetype(font_path, size)
 
-
-url = 'https://api.tfl.gov.uk/Line/district,hammersmith-city/Arrivals/940GZZLUWPL'
-payload = {'app_id': config.app_id, 'app_key': config.app_key, 'direction': 'inbound'}
 current_milli_time = lambda: int(str(round(time.time() * 1000))[-3:])
 
 
 try:
 
-  upcoming_arrivals = []
-  font_regular, font_bold = setDisplayStyle()
-  last_refresh_time = time.time() - REFRESH_INTERVAL
   device = get_device()
+  font_regular, font_bold = setDisplayStyle()
 
+  query_station_string = 'Aldgate East'
+  station = query_for_station_data(query_station_string)
+
+  upcoming_arrivals = []
+  url = 'https://api.tfl.gov.uk/Line/' + ','.join(station.availableLines) + '/Arrivals/' + station.id
+  payload = {'app_id': config.app_id, 'app_key': config.app_key, 'direction': TRAVEL_DIRECTION_INBOUND}
+
+  last_refresh_time = time.time() - REFRESH_INTERVAL
   while True:
 
     # Refresh Data when TTL Expired
@@ -203,7 +241,7 @@ try:
 
       last_refresh_time = time.time()
 
-    generate_departure_board(device, upcoming_arrivals[:3])
+    generate_departure_board(device, upcoming_arrivals[:3], station)
     time.sleep(.1)
 
 

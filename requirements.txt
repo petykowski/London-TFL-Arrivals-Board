@@ -1,2 +1,3 @@
 luma.core-1.12.0
 luma.emulator==1.2.0
+pytz==2019.3
