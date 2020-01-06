@@ -41,13 +41,30 @@ class trainArrival:
     self.isTrainApproaching = item['timeToStation'] < 30
 
 
+def internet_connection_found():
+  '''
+  Returns a boolean to determine if there is an active internet 
+  connection.
+  '''
+
+  url = CHECK_INTERNET_URL
+  timeout = 1
+
+  try:
+    _ = requests.get(url, timeout =timeout)
+    return True
+
+  except requests.ConnectionError:
+    print("No Internet connection found")
+    return False
+
+
 def query_TFL(url, params):
   '''
   Wrapper function for querying the TFL API
   '''
 
   response = requests.get(url, params=params)
-
 
   if response.status_code == 200:
     if not response.json():
@@ -141,7 +158,7 @@ def build_arrival_message(display, row_num):
   display.text((((DISPLAY_WIDTH-w1)/2), ((row_num-1) * 14)), text=MSG_TRAIN_APPROACHING, font=font_regular, fill="yellow")
 
 
-def build_clock(display):
+def build_clock(display, show_seconds=True):
   '''
   Returns a clock which displays the current time . This function 
   will only return a colon ":" between the time numbers every 
@@ -151,10 +168,13 @@ def build_clock(display):
   current_time_in_london = datetime.now(timezone('Europe/London'))
   current_time_milli = current_milli_time()
 
-  if current_time_milli > 500:
-    current_time = current_time_in_london.strftime("%H:%M:%S")
+  if show_seconds:
+    if current_time_milli > 500:
+      current_time = current_time_in_london.strftime("%H %M %S")
+    else:
+      current_time = current_time_in_london.strftime("%H %M %S")
   else:
-    current_time = current_time_in_london.strftime("%H %M %S")
+    current_time = current_time_in_london.strftime("%H:%M")
 
   w1, h1 = display.textsize(current_time, font_bold)
   display.text((((DISPLAY_WIDTH-w1)/2), (DISPLAY_HEIGHT-h1)), text=current_time, font=font_bold, fill="yellow")
@@ -166,18 +186,30 @@ def generate_arrival_row(display, arrival, row_num):
   build_arrival_time(display, arrival, row_num)
 
 
+def generate_welcome_board(device, data, station):
+  '''
+  Displays a welcome message when there are no trains approaching 
+  the station, and a Not in Service message if no internet 
+  connection is found.
+  '''
+
+  if not station:
+    welcome_msg = "Not in Service"
+  else:
+    welcome_msg = "Welcome to " + station.stationName
+
+  with canvas(device) as display:
+    w1, h1 = display.textsize(welcome_msg, font_regular)
+    display.text((((DISPLAY_WIDTH-w1)/2), 0), text=welcome_msg, font=font_regular, fill="yellow")
+
+    # Generate Time
+    build_clock(display, False)
+
+
 def generate_departure_board(device, data, station):
 
   if not data:
-
-    welcome_msg = "Welcome to " + station.stationName
-
-    with canvas(device) as display:
-      w1, h1 = display.textsize(welcome_msg, font_regular)
-      display.text((((DISPLAY_WIDTH-w1)/2), 0), text=welcome_msg, font=font_regular, fill="yellow")
-
-      # Generate Time
-      build_clock(display)
+    generate_welcome_board(device, data, station)
   else:
     row_num = 1
     with canvas(device) as display:
@@ -219,12 +251,17 @@ try:
   device = get_device()
   font_regular, font_bold = setDisplayStyle()
 
+  while not internet_connection_found():
+    generate_departure_board(device, None, None)
+    time.sleep(5)
+
   query_station_string = 'Aldgate East'
+  query_train_direction = TRAVEL_DIRECTION_INBOUND
   station = query_for_station_data(query_station_string)
 
   upcoming_arrivals = []
   url = 'https://api.tfl.gov.uk/Line/' + ','.join(station.availableLines) + '/Arrivals/' + station.id
-  payload = {'app_id': config.app_id, 'app_key': config.app_key, 'direction': TRAVEL_DIRECTION_INBOUND}
+  payload = {'app_id': config.app_id, 'app_key': config.app_key, 'direction': query_train_direction}
 
   last_refresh_time = time.time() - REFRESH_INTERVAL
   while True:
