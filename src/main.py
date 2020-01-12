@@ -170,7 +170,7 @@ def build_clock(display, show_seconds=True):
 
   if show_seconds:
     if current_time_milli > 500:
-      current_time = current_time_in_london.strftime("%H %M %S")
+      current_time = current_time_in_london.strftime("%H:%M:%S")
     else:
       current_time = current_time_in_london.strftime("%H %M %S")
   else:
