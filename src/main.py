@@ -15,7 +15,7 @@ from luma.core.render import canvas
 
 class undergroundStation:
   '''
-  Represents a Station on the TFL Underground network.
+  Represents a Station on the TFL undergroundStation network.
   '''
 
   def __init__(self, item):
@@ -59,6 +59,12 @@ def internet_connection_found():
     return False
 
 
+def get_station():
+  response = requests.get(config.station_url)
+  print(response.text)
+  return response.text
+
+
 def query_TFL(url, params):
   '''
   Wrapper function for querying the TFL API
@@ -77,12 +83,11 @@ def query_TFL(url, params):
   else:
     raise ValueError('Error Communicating with TFL')
 
+
 def query_for_station_data(query_station_string):
   '''
   Returns a populated undergroundStation class object based on the 
   requested station name.
-  NOTE: query_station_string is currently hard coded in the main
-  try() call.
   '''
 
   query_station_url = 'https://api.tfl.gov.uk/StopPoint/Search'
@@ -103,6 +108,16 @@ def query_for_station_data(query_station_string):
 
   return station
 
+
+def query_for_arrival_data(station, direction=None):
+  '''
+  Returns arriving trains for given station and direction
+  '''
+
+  url = 'https://api.tfl.gov.uk/Line/' + ','.join(station.availableLines) + '/Arrivals/' + station.id
+  payload = {'app_id': config.app_id, 'app_key': config.app_key, 'direction': direction}
+
+  return query_TFL(url, payload)
 
 def setDisplayStyle(style=STYLE_STANDARD):
   '''
@@ -206,7 +221,7 @@ def generate_welcome_board(device, data, station):
     build_clock(display, False)
 
 
-def generate_departure_board(device, data, station):
+def generate_arrival_board(device, data, station):
 
   if not data:
     generate_welcome_board(device, data, station)
@@ -252,33 +267,36 @@ try:
   font_regular, font_bold = setDisplayStyle()
 
   while not internet_connection_found():
-    generate_departure_board(device, None, None)
+    generate_arrival_board(device, None, None)
     time.sleep(5)
 
-  query_station_string = 'Aldgate East'
+  query_station_string = get_station()
   query_train_direction = TRAVEL_DIRECTION_INBOUND
-  station = query_for_station_data(query_station_string)
+  current_station = query_for_station_data(query_station_string)
 
   upcoming_arrivals = []
-  url = 'https://api.tfl.gov.uk/Line/' + ','.join(station.availableLines) + '/Arrivals/' + station.id
-  payload = {'app_id': config.app_id, 'app_key': config.app_key, 'direction': query_train_direction}
-
   last_refresh_time = time.time() - REFRESH_INTERVAL
+
   while True:
 
     # Refresh Data when TTL Expired
     if (time.time() - last_refresh_time >= REFRESH_INTERVAL):
 
-      json = query_TFL(url, payload)
+      requested_station = get_station()
+
+      if not current_station == requested_station:
+        current_station = query_for_station_data(requested_station)
+
+      json = query_for_arrival_data(current_station, query_train_direction)
       sortedJson = sorted(json, key=lambda k: k['timeToStation'])
       upcoming_arrivals = []
 
-      for departure in sortedJson:
-        upcoming_arrivals.append(trainArrival(departure))
+      for arriving_train in sortedJson:
+        upcoming_arrivals.append(trainArrival(arriving_train))
 
       last_refresh_time = time.time()
 
-    generate_departure_board(device, upcoming_arrivals[:3], station)
+    generate_arrival_board(device, upcoming_arrivals[:3], requested_station)
     time.sleep(.1)
 
 
