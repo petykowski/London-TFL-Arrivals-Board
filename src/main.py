@@ -15,7 +15,7 @@ from luma.core.render import canvas
 
 class undergroundStation:
   '''
-  Represents a Station on the TFL undergroundStation network.
+  Represents a Station on the TFL Underground network.
   '''
 
   def __init__(self, item):
@@ -41,6 +41,20 @@ class trainArrival:
     self.isTrainApproaching = item['timeToStation'] < 30
 
 
+class requestedStation:
+  '''
+  Represents data related to the station requested by user.
+  '''
+
+  def __init__(self, item):
+    self.name = item['station']
+    if item['direction'].lower() in [TRAVEL_DIRECTION_INBOUND, TRAVEL_DIRECTION_OUTBOUND]:
+      self.direction = item['direction'].lower()
+    else:
+      self.direction = TRAVEL_DIRECTION_INBOUND
+    self.requestedOn = item['updated_on']
+
+
 def internet_connection_found():
   '''
   Returns a boolean to determine if there is an active internet 
@@ -61,8 +75,8 @@ def internet_connection_found():
 
 def get_station():
   response = requests.get(config.station_url)
-  print(response.text)
-  return response.text
+  response_json = json.loads(response.text)
+  return requestedStation(response_json)
 
 
 def query_TFL(url, params):
@@ -84,14 +98,14 @@ def query_TFL(url, params):
     raise ValueError('Error Communicating with TFL')
 
 
-def query_for_station_data(query_station_string):
+def query_for_station_data(requested_station):
   '''
   Returns a populated undergroundStation class object based on the 
   requested station name.
   '''
 
   query_station_url = 'https://api.tfl.gov.uk/StopPoint/Search'
-  query_station_payload = {'query': query_station_string, 'modes': 'tube', 'app_id': config.app_id, 'app_key': config.app_key}
+  query_station_payload = {'query': requested_station, 'modes': 'tube', 'app_id': config.app_id, 'app_key': config.app_key}
   station_response = query_TFL(query_station_url, query_station_payload)
 
   station = undergroundStation(station_response)
@@ -118,6 +132,7 @@ def query_for_arrival_data(station, direction=None):
   payload = {'app_id': config.app_id, 'app_key': config.app_key, 'direction': direction}
 
   return query_TFL(url, payload)
+
 
 def setDisplayStyle(style=STYLE_STANDARD):
   '''
@@ -258,8 +273,8 @@ def generate_font(name, size):
   )
   return ImageFont.truetype(font_path, size)
 
-current_milli_time = lambda: int(str(round(time.time() * 1000))[-3:])
 
+current_milli_time = lambda: int(str(round(time.time() * 1000))[-3:])
 
 try:
 
@@ -270,33 +285,38 @@ try:
     generate_arrival_board(device, None, None)
     time.sleep(5)
 
-  query_station_string = get_station()
+  requested_station = get_station()
   query_train_direction = TRAVEL_DIRECTION_INBOUND
-  current_station = query_for_station_data(query_station_string)
+  current_station = query_for_station_data(requested_station.name)
+  last_refresh_time_aws = time.time()
 
   upcoming_arrivals = []
-  last_refresh_time = time.time() - REFRESH_INTERVAL
+  last_refresh_time_tfl = time.time() - REFRESH_INTERVAL_TFL
+
 
   while True:
 
-    # Refresh Data when TTL Expired
-    if (time.time() - last_refresh_time >= REFRESH_INTERVAL):
+    # Refresh Data when AWS Expired
+    if (time.time() - last_refresh_time_aws >= REFRESH_INTERVAL_AWS):
 
-      requested_station = get_station()
-
-      if not current_station == requested_station:
+      if not requested_station.requestedOn == get_station().requestedOn:
         current_station = query_for_station_data(requested_station)
 
-      json = query_for_arrival_data(current_station, query_train_direction)
-      sortedJson = sorted(json, key=lambda k: k['timeToStation'])
+      last_refresh_time_aws = time.time()
+
+    # Refresh Data when TTL Expired
+    if (time.time() - last_refresh_time_tfl >= REFRESH_INTERVAL_TFL):
+
+      arrival_data = query_for_arrival_data(current_station, requested_station.direction)
+      arrivals_by_arrival_time = sorted(arrival_data, key=lambda k: k['timeToStation'])
       upcoming_arrivals = []
 
-      for arriving_train in sortedJson:
+      for arriving_train in arrivals_by_arrival_time:
         upcoming_arrivals.append(trainArrival(arriving_train))
 
-      last_refresh_time = time.time()
+      last_refresh_time_tfl = time.time()
 
-    generate_arrival_board(device, upcoming_arrivals[:3], requested_station)
+    generate_arrival_board(device, upcoming_arrivals[:3], current_station)
     time.sleep(.1)
 
 
