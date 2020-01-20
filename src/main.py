@@ -19,9 +19,17 @@ class undergroundStation:
   '''
 
   def __init__(self, item):
+    self.userQuery = item['station']
+    self.availableLines = []
+    if item['direction'].lower() in [TRAVEL_DIRECTION_INBOUND, TRAVEL_DIRECTION_OUTBOUND]:
+      self.direction = item['direction'].lower()
+    else:
+      self.direction = TRAVEL_DIRECTION_INBOUND
+    self.requestedOn = item['updated_on']
+
+  def addTFLStationData(self, item):
     self.id = item['matches'][0]['id']
     self.stationName = item['matches'][0]['name']
-    self.availableLines = []
 
   def addAvailableLines(self, lines):
     self.availableLines = lines
@@ -39,20 +47,6 @@ class trainArrival:
     self.timeToStation = item['timeToStation']
     self.destinationName = item['towards']
     self.isTrainApproaching = item['timeToStation'] < 30
-
-
-class requestedStation:
-  '''
-  Represents data related to the station requested by user.
-  '''
-
-  def __init__(self, item):
-    self.name = item['station']
-    if item['direction'].lower() in [TRAVEL_DIRECTION_INBOUND, TRAVEL_DIRECTION_OUTBOUND]:
-      self.direction = item['direction'].lower()
-    else:
-      self.direction = TRAVEL_DIRECTION_INBOUND
-    self.requestedOn = item['updated_on']
 
 
 def internet_connection_found():
@@ -73,42 +67,47 @@ def internet_connection_found():
     return False
 
 
-def get_station():
-  response = requests.get(config.station_url)
-  response_json = json.loads(response.text)
-  return requestedStation(response_json)
-
-
 def query_TFL(url, params):
   '''
   Wrapper function for querying the TFL API
   '''
 
-  response = requests.get(url, params=params)
+  for retry_count in range(0,2):
+    try:
+      response = requests.get(url, params=params)
+      if response.status_code == 200:
+        if not response.json():
+          print('Nothing was returned from TFL')
+        else:
+          print('Success. Returning JSON')
+        return response.json()
+      else:
+        raise ValueError('Error Communicating with TFL')
+    except ValueError:
+      if retry_count == 2:
+        raise ValueError('Max Retries Attempted')
+      else:
+        continue
 
-  if response.status_code == 200:
-    if not response.json():
-      print('Nothing was returned from TFL')
-    else:
-      print('Success. Returning JSON')
 
-    return response.json()
-
-  else:
-    raise ValueError('Error Communicating with TFL')
-
-
-def query_for_station_data(requested_station):
+def get_station():
   '''
   Returns a populated undergroundStation class object based on the 
   requested station name.
   '''
 
+  response = requests.get(config.station_url)
+  response_json = json.loads(response.text)
+  station = undergroundStation(response_json)
+
   query_station_url = 'https://api.tfl.gov.uk/StopPoint/Search'
-  query_station_payload = {'query': requested_station, 'modes': 'tube', 'app_id': config.app_id, 'app_key': config.app_key}
+  query_station_payload = {'query': station.userQuery, 'modes': 'tube', 'app_id': config.app_id, 'app_key': config.app_key}
   station_response = query_TFL(query_station_url, query_station_payload)
 
-  station = undergroundStation(station_response)
+  if not station_response['matches']:
+    return station
+
+  station.addTFLStationData(station_response)
 
   query_lines_url = 'https://api.tfl.gov.uk/StopPoint/ServiceTypes'
   query_lines_payload = {'id': station.id, 'app_id': config.app_id, 'app_key': config.app_key}
@@ -123,13 +122,23 @@ def query_for_station_data(requested_station):
   return station
 
 
-def query_for_arrival_data(station, direction=None):
+def get_last_time_station_requested():
+  '''
+  Returns the last time station was requested
+  '''
+
+  response = requests.get(config.station_url)
+  response_json = json.loads(response.text)
+  return response_json['updated_on']
+
+
+def query_for_arrival_data(station):
   '''
   Returns arriving trains for given station and direction
   '''
 
   url = 'https://api.tfl.gov.uk/Line/' + ','.join(station.availableLines) + '/Arrivals/' + station.id
-  payload = {'app_id': config.app_id, 'app_key': config.app_key, 'direction': direction}
+  payload = {'app_id': config.app_id, 'app_key': config.app_key, 'direction': station.direction}
 
   return query_TFL(url, payload)
 
@@ -223,7 +232,7 @@ def generate_welcome_board(device, data, station):
   connection is found.
   '''
 
-  if not station:
+  if not hasattr(station, 'id'):
     welcome_msg = "Not in Service"
   else:
     welcome_msg = "Welcome to " + station.stationName
@@ -286,8 +295,6 @@ try:
     time.sleep(5)
 
   requested_station = get_station()
-  query_train_direction = TRAVEL_DIRECTION_INBOUND
-  current_station = query_for_station_data(requested_station.name)
   last_refresh_time_aws = time.time()
 
   upcoming_arrivals = []
@@ -296,27 +303,33 @@ try:
 
   while True:
 
-    # Refresh Data when AWS Expired
+    # Refresh Station when AWS Refresh Interval Expires 
     if (time.time() - last_refresh_time_aws >= REFRESH_INTERVAL_AWS):
 
-      if not requested_station.requestedOn == get_station().requestedOn:
-        current_station = query_for_station_data(requested_station)
+      # Update Station when one has been requested
+      if not requested_station.requestedOn == get_last_time_station_requested():
+        requested_station = get_station()
+        upcoming_arrivals = []
+        force_refresh = True
 
       last_refresh_time_aws = time.time()
 
-    # Refresh Data when TTL Expired
-    if (time.time() - last_refresh_time_tfl >= REFRESH_INTERVAL_TFL):
+    if hasattr(requested_station, 'id'):
 
-      arrival_data = query_for_arrival_data(current_station, requested_station.direction)
-      arrivals_by_arrival_time = sorted(arrival_data, key=lambda k: k['timeToStation'])
-      upcoming_arrivals = []
+      # Refresh Data when TTL Expired
+      if (time.time() - last_refresh_time_tfl >= REFRESH_INTERVAL_TFL) or force_refresh:
 
-      for arriving_train in arrivals_by_arrival_time:
-        upcoming_arrivals.append(trainArrival(arriving_train))
+        arrival_data = query_for_arrival_data(requested_station)
+        arrivals_by_arrival_time = sorted(arrival_data, key=lambda k: k['timeToStation'])
+        upcoming_arrivals = []
 
-      last_refresh_time_tfl = time.time()
+        for arriving_train in arrivals_by_arrival_time:
+          upcoming_arrivals.append(trainArrival(arriving_train))
 
-    generate_arrival_board(device, upcoming_arrivals[:3], current_station)
+        force_refresh = False
+        last_refresh_time_tfl = time.time()
+
+    generate_arrival_board(device, upcoming_arrivals[:3], requested_station)
     time.sleep(.1)
 
 
