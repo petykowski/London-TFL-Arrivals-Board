@@ -150,7 +150,7 @@ def setDisplayStyle(style=STYLE_STANDARD):
   '''
 
   if style == STYLE_STANDARD:
-    font_regular = generate_font('London Underground Regular.ttf', 9)
+    font_regular = generate_font('London Underground Heavy.ttf', 9)
     font_bold = generate_font('London Underground Bold.ttf', 9)
   else:
     font_regular = generate_font('Dot Matrix Regular.ttf', 9)
@@ -289,6 +289,21 @@ try:
 
   device = get_device()
   font_regular, font_bold = setDisplayStyle()
+
+  # Testing Font Sizes
+  while True:
+    with canvas(device) as display:
+      font_9 = generate_font('London Underground Heavy.ttf', 9)
+      font_10 = generate_font('London Underground Heavy.ttf', 10)
+      font_11 = generate_font('London Underground Heavy.ttf', 11)
+      font_12 = generate_font('London Underground Heavy.ttf', 12)
+      font_13 = generate_font('London Underground Heavy.ttf', 13)
+      display.text((0, 0), text="Ba", font=font_9, fill="yellow")
+      display.text((0, 11), text="Ba", font=font_10, fill="yellow")
+      display.text((0, 22), text="Ba", font=font_11, fill="yellow")
+      display.text((0, 34), text="Ba", font=font_12, fill="yellow")
+      display.text((0, 47), text="Ba", font=font_13, fill="yellow")
+
 
   while not internet_connection_found():
     generate_arrival_board(device, None, None)
