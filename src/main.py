@@ -28,8 +28,8 @@ class undergroundStation:
     self.requestedOn = item['updated_on']
 
   def addTFLStationData(self, item):
-    self.id = item['matches'][0]['id']
-    self.stationName = item['matches'][0]['name']
+    self.id = item['id']
+    self.stationName = item['name']
 
   def addAvailableLines(self, lines):
     self.availableLines = lines
@@ -45,7 +45,7 @@ class trainArrival:
     self.timeOfExpiration = item['timeToStation'] + 60
     self.timeOfExpectedArrival = time.time() + item['timeToStation']
     self.timeToStation = item['timeToStation']
-    self.destinationName = item['towards']
+    self.destinationName = format_destination_station_name(item['destinationName'])
     self.isTrainApproaching = item['timeToStation'] < 30
 
 
@@ -96,30 +96,74 @@ def get_station():
   requested station name.
   '''
 
+  # Query for requested station from AWS and populate station object
   response = requests.get(config.station_url)
   response_json = json.loads(response.text)
   station = undergroundStation(response_json)
 
+  # Execute search for requested station
   query_station_url = 'https://api.tfl.gov.uk/StopPoint/Search'
-  query_station_payload = {'query': station.userQuery, 'modes': 'tube', 'app_id': config.app_id, 'app_key': config.app_key}
+  query_station_payload = {
+    'query': station.userQuery,
+    # Filter for stations with tube as available mode
+    'modes': 'tube',
+    'maxResults': 1,
+    'app_id': config.app_id,
+    'app_key': config.app_key
+  }
   station_response = query_TFL(query_station_url, query_station_payload)
 
+  '''
+  Return simple Station object when no matches found.
+  NOTE: This mostly unpopulated Station object does not contain an ID
+  attribute which will trigger a station not found message.
+  '''
   if not station_response['matches']:
     return station
 
-  station.addTFLStationData(station_response)
+  # Populate Station object with complete information when Station found.
+  station.addTFLStationData(station_response['matches'][0])
 
-  query_lines_url = 'https://api.tfl.gov.uk/StopPoint/ServiceTypes'
-  query_lines_payload = {'id': station.id, 'app_id': config.app_id, 'app_key': config.app_key}
+  # Query for available lines
+  query_lines_url = 'https://api.tfl.gov.uk/StopPoint/' + station.id + '?'
+  query_lines_payload = {
+    'app_id': config.app_id,
+    'app_key': config.app_key
+  }
   lines_response = query_TFL(query_lines_url, query_lines_payload)
 
-  available_lines_at_station = []
-  for line in lines_response:
-    available_lines_at_station.append(line['lineName'])
-
-  station.addAvailableLines(available_lines_at_station)
+  # Determine if search result is a Station or HUB
+  if lines_response['stopType'] == 'NaptanMetroStation':
+    station.addAvailableLines(extract_lines_from_groups('tube', lines_response['lineModeGroups']))
+  elif lines_response['stopType'] == 'TransportInterchange':
+    for children in lines_response['children']:
+      if children['stopType'] == 'NaptanMetroStation':
+        # Update id
+        station.id = children['stationNaptan']
+        station.addAvailableLines(extract_lines_from_groups('tube', lines_response['lineModeGroups']))
+      else:
+        pass
 
   return station
+
+
+def extract_lines_from_groups(mode, lineModeGroups):
+  '''
+  Returns a list of line identifiers for the given mode.
+  '''
+
+  for group in lineModeGroups:
+      if group['modeName'] == mode:
+        return group['lineIdentifier']
+
+
+def format_destination_station_name(stationName):
+  '''
+  Returns a formatted destination station name for ready
+  for displaying.
+  '''
+
+  return stationName.replace('Underground Station', '').replace('(H&C Line)', '').strip()
 
 
 def get_last_time_station_requested():
@@ -199,9 +243,9 @@ def build_arrival_message(display, row_num):
 
 def build_clock(display, show_seconds=True):
   '''
-  Returns a clock which displays the current time . This function 
+  Returns a clock which displays the current time. This function 
   will only return a colon ":" between the time numbers every 
-  half second.
+  half second when seconds are displayed.
   '''
 
   current_time_in_london = datetime.now(timezone('Europe/London'))
@@ -233,7 +277,7 @@ def generate_welcome_board(device, data, station):
   '''
 
   if not hasattr(station, 'id'):
-    welcome_msg = "Not in Service"
+    welcome_msg = MSG_NOT_IN_SERVICE
   else:
     welcome_msg = "Welcome to " + station.stationName
 
@@ -241,7 +285,7 @@ def generate_welcome_board(device, data, station):
     w1, h1 = display.textsize(welcome_msg, font_regular)
     display.text((((DISPLAY_WIDTH-w1)/2), 0), text=welcome_msg, font=font_regular, fill="yellow")
 
-    # Generate Time
+    # Generate time without seconds
     build_clock(display, False)
 
 
@@ -284,6 +328,7 @@ def generate_font(name, size):
 
 
 current_milli_time = lambda: int(str(round(time.time() * 1000))[-3:])
+
 
 try:
 
