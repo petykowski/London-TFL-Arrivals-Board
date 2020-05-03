@@ -245,13 +245,14 @@ def build_arrival_time(display, arrival, row_num):
   display.text((DISPLAY_WIDTH-(w_time + w_text), ((row_num-1) * 14)), text=arrival_time + arrival_text, font=font_regular, fill="yellow")
 
 
-def build_arrival_message(display, row_num):
+def build_train_approaching_message(display, row_num):
   '''
-  Returns an arrival message when a train is approaching the station.
+  Returns an arrival message when a train is approaching the station
+  on the last printable line of the display
   '''
 
   w1, h1 = display.textsize(MSG_TRAIN_APPROACHING, font_regular)
-  display.text((((DISPLAY_WIDTH-w1)/2), ((row_num-1) * 14)), text=MSG_TRAIN_APPROACHING, font=font_regular, fill="yellow")
+  display.text((((DISPLAY_WIDTH-w1)/2), ((3) * 14)), text=MSG_TRAIN_APPROACHING, font=font_regular, fill="yellow")
 
 
 def build_clock(display, show_seconds=True):
@@ -319,7 +320,7 @@ def generate_arrival_board(device, data, station):
         row_num += 1
 
       if True in [arrival.isTrainApproaching for arrival in data]:
-        build_arrival_message(display, row_num)
+        build_train_approaching_message(display, row_num)
 
       # Generate Time
       build_clock(display)
