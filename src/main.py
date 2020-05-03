@@ -157,6 +157,30 @@ def extract_lines_from_groups(mode, lineModeGroups):
         return group['lineIdentifier']
 
 
+def refresh_arrival_data(station):
+  '''
+  Returns a sorted list of trainArrival objects for the given station
+  '''
+
+  # Query for arrival data
+  query_arrival_url = 'https://api.tfl.gov.uk/Line/' + ','.join(station.availableLines) + '/Arrivals/' + station.id
+  query_arrival_payload = {
+    'app_id': config.app_id,
+    'app_key': config.app_key,
+    'direction': station.direction
+  }
+  arrival_data = query_TFL(query_arrival_url, query_arrival_payload)
+
+  # Sort arriving trains by their time to station
+  arrivals_by_arrival_time = sorted(arrival_data, key=lambda k: k['timeToStation'])
+  # Generate list of trainArrivals
+  upcoming_arrivals = []
+  for arriving_train in arrivals_by_arrival_time:
+    upcoming_arrivals.append(trainArrival(arriving_train))
+
+  return upcoming_arrivals
+
+
 def format_destination_station_name(stationName):
   '''
   Returns a formatted destination station name for ready
@@ -174,17 +198,6 @@ def get_last_time_station_requested():
   response = requests.get(config.station_url)
   response_json = json.loads(response.text)
   return response_json['updated_on']
-
-
-def query_for_arrival_data(station):
-  '''
-  Returns arriving trains for given station and direction
-  '''
-
-  url = 'https://api.tfl.gov.uk/Line/' + ','.join(station.availableLines) + '/Arrivals/' + station.id
-  payload = {'app_id': config.app_id, 'app_key': config.app_key, 'direction': station.direction}
-
-  return query_TFL(url, payload)
 
 
 def setDisplayStyle(style=STYLE_STANDARD):
@@ -327,6 +340,7 @@ def generate_font(name, size):
   return ImageFont.truetype(font_path, size)
 
 
+# Maintains current time in milliseconds
 current_milli_time = lambda: int(str(round(time.time() * 1000))[-3:])
 
 
@@ -361,16 +375,12 @@ try:
 
     if hasattr(requested_station, 'id'):
 
-      # Refresh Data when TTL Expired
+      # Refresh Data when TTL Expired or Forced Refresh
       if (time.time() - last_refresh_time_tfl >= REFRESH_INTERVAL_TFL) or force_refresh:
 
-        arrival_data = query_for_arrival_data(requested_station)
-        arrivals_by_arrival_time = sorted(arrival_data, key=lambda k: k['timeToStation'])
-        upcoming_arrivals = []
+        upcoming_arrivals = refresh_arrival_data(requested_station)
 
-        for arriving_train in arrivals_by_arrival_time:
-          upcoming_arrivals.append(trainArrival(arriving_train))
-
+        # Reset default variables
         force_refresh = False
         last_refresh_time_tfl = time.time()
 
