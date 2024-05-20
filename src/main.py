@@ -96,33 +96,55 @@ def get_station():
   requested station name.
   '''
 
-  # Query for requested station from AWS and populate station object
-  response = requests.get(config.station_url)
-  response_json = json.loads(response.text)
-  station = undergroundStation(response_json)
+  # Manually populate station if provided via contstants
+  if all(x in globals() for x in ['STATION_CODE', 'DIRECTION']):
+    print('Manually Processing')
 
-  # Execute search for requested station
-  query_station_url = 'https://api.tfl.gov.uk/StopPoint/Search'
-  query_station_payload = {
-    'query': station.userQuery,
-    # Filter for stations with tube as available mode
-    'modes': 'tube',
-    'maxResults': 1,
-    'app_id': config.app_id,
-    'app_key': config.app_key
-  }
-  station_response = query_TFL(query_station_url, query_station_payload)
+    station_from_constant = {
+      'id': STATION_CODE,
+      'name': "Example",
+      'station': "Manual Station",
+      'direction': DIRECTION,
+      'updated_on': time.time()
+    }
+    
+    station = undergroundStation(station_from_constant)
 
-  '''
-  Return simple Station object when no matches found.
-  NOTE: This mostly unpopulated Station object does not contain an ID
-  attribute which will trigger a station not found message.
-  '''
-  if not station_response['matches']:
-    return station
+    station.addTFLStationData(station_from_constant)
 
-  # Populate Station object with complete information when Station found.
-  station.addTFLStationData(station_response['matches'][0])
+    print(station.__dict__)
+
+  else:
+
+    # Query for requested station from AWS and populate station object
+    response = requests.get(config.station_url)
+    response_json = json.loads(response.text)
+    station = undergroundStation(response_json)
+
+
+    # Execute search for requested station
+    query_station_url = 'https://api.tfl.gov.uk/StopPoint/Search'
+    query_station_payload = {
+      'query': station.userQuery,
+      # Filter for stations with tube as available mode
+      'modes': 'tube',
+      'maxResults': 1,
+      'app_id': config.app_id,
+      'app_key': config.app_key
+    }
+    station_response = query_TFL(query_station_url, query_station_payload)
+
+
+    '''
+    Return simple Station object when no matches found.
+    NOTE: This mostly unpopulated Station object does not contain an ID
+    attribute which will trigger a station not found message.
+    '''
+    if not station_response['matches']:
+      return station
+
+    # Populate Station object with complete information when Station found.
+    station.addTFLStationData(station_response['matches'][0])
 
   # Query for available lines
   query_lines_url = 'https://api.tfl.gov.uk/StopPoint/' + station.id + '?'
@@ -134,18 +156,17 @@ def get_station():
 
   # Determine if search result is a Station or HUB
   if lines_response['stopType'] == 'NaptanMetroStation':
-    station.addAvailableLines(extract_lines_from_groups('tube', lines_response['lineModeGroups']))
+    station.addAvailableLines(extract_lines_from_groups(TRAVEL_MODE, lines_response['lineModeGroups']))
   elif lines_response['stopType'] == 'TransportInterchange':
     for children in lines_response['children']:
-      if children['stopType'] == 'NaptanMetroStation':
+      if children['stopType'] == 'NaptanMetroStation' and TRAVEL_MODE in children['modes']:
         # Update id
         station.id = children['stationNaptan']
-        station.addAvailableLines(extract_lines_from_groups('tube', lines_response['lineModeGroups']))
+        station.addAvailableLines(extract_lines_from_groups(TRAVEL_MODE, lines_response['lineModeGroups']))
       else:
         pass
-
+  print(station.__dict__)
   return station
-
 
 def extract_lines_from_groups(mode, lineModeGroups):
   '''
@@ -187,7 +208,7 @@ def format_destination_station_name(stationName):
   for displaying.
   '''
 
-  return stationName.replace('Underground Station', '').replace('(H&C Line)', '').strip()
+  return stationName.replace('Underground Station', '').replace('(H&C Line)', '').replace('DLR Station', '').strip()
 
 
 def get_last_time_station_requested():
