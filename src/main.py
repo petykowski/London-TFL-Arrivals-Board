@@ -97,22 +97,14 @@ def get_station():
   '''
 
   # Manually populate station if provided via contstants
-  if all(x in globals() for x in ['STATION_CODE', 'DIRECTION']):
-    print('Manually Processing')
+  if all(x in globals() for x in ['STATION_NAME', 'DIRECTION']):
 
     station_from_constant = {
-      'id': STATION_CODE,
-      'name': "Example",
-      'station': "Manual Station",
+      'station': STATION_NAME,
       'direction': DIRECTION,
       'updated_on': time.time()
     }
-    
     station = undergroundStation(station_from_constant)
-
-    station.addTFLStationData(station_from_constant)
-
-    print(station.__dict__)
 
   else:
 
@@ -121,30 +113,29 @@ def get_station():
     response_json = json.loads(response.text)
     station = undergroundStation(response_json)
 
+  # Execute search for requested station
+  query_station_url = 'https://api.tfl.gov.uk/StopPoint/Search'
+  query_station_payload = {
+    'query': station.userQuery,
+    # Filter for stations with tube as available mode
+    'modes': TRAVEL_MODE,
+    'maxResults': 1,
+    'app_id': config.app_id,
+    'app_key': config.app_key
+  }
+  station_response = query_TFL(query_station_url, query_station_payload)
 
-    # Execute search for requested station
-    query_station_url = 'https://api.tfl.gov.uk/StopPoint/Search'
-    query_station_payload = {
-      'query': station.userQuery,
-      # Filter for stations with tube as available mode
-      'modes': 'tube',
-      'maxResults': 1,
-      'app_id': config.app_id,
-      'app_key': config.app_key
-    }
-    station_response = query_TFL(query_station_url, query_station_payload)
 
+  '''
+  Return simple Station object when no matches found.
+  NOTE: This mostly unpopulated Station object does not contain an ID
+  attribute which will trigger a station not found message.
+  '''
+  if not station_response['matches']:
+    return station
 
-    '''
-    Return simple Station object when no matches found.
-    NOTE: This mostly unpopulated Station object does not contain an ID
-    attribute which will trigger a station not found message.
-    '''
-    if not station_response['matches']:
-      return station
-
-    # Populate Station object with complete information when Station found.
-    station.addTFLStationData(station_response['matches'][0])
+  # Populate Station object with complete information when Station found.
+  station.addTFLStationData(station_response['matches'][0])
 
   # Query for available lines
   query_lines_url = 'https://api.tfl.gov.uk/StopPoint/' + station.id + '?'
@@ -165,7 +156,6 @@ def get_station():
         station.addAvailableLines(extract_lines_from_groups(TRAVEL_MODE, lines_response['lineModeGroups']))
       else:
         pass
-  print(station.__dict__)
   return station
 
 def extract_lines_from_groups(mode, lineModeGroups):
@@ -191,15 +181,41 @@ def refresh_arrival_data(station):
     'direction': station.direction
   }
   arrival_data = query_TFL(query_arrival_url, query_arrival_payload)
+  upcoming_arrivals = sort_arrivals_by_arrival_time(arrival_data)
+
+  return upcoming_arrivals
+
+
+def sort_arrivals_by_arrival_time(arrival_data):
+  '''
+  Returns a sorted list of trainArrival objects and filters for 
+  certian platforms at certian DLR stations
+  '''
 
   # Sort arriving trains by their time to station
   arrivals_by_arrival_time = sorted(arrival_data, key=lambda k: k['timeToStation'])
-  # Generate list of trainArrivals
-  upcoming_arrivals = []
-  for arriving_train in arrivals_by_arrival_time:
-    upcoming_arrivals.append(trainArrival(arriving_train))
 
-  return upcoming_arrivals
+  # Generate list of trainArrivals
+  sorted_arrivals = []
+  for arriving_train in arrivals_by_arrival_time:
+
+    # Apply DLR specific logic
+    if TRAVEL_MODE == 'dlr':
+      # Filter for a single platform as Canary Wharf DLR has multiple platforms for the same train
+      if arriving_train['naptanId'] == '940GZZDLCAN':
+        canary_wharf_platform = ''
+        # Define platform based on direction
+        if arriving_train['direction'] == TRAVEL_DIRECTION_INBOUND:
+          canary_wharf_platform = 'Platform 6'
+        else:
+          canary_wharf_platform = 'Platform 1'
+        if arriving_train['platformName'] == canary_wharf_platform:
+          sorted_arrivals.append(trainArrival(arriving_train))
+
+    else:
+      sorted_arrivals.append(trainArrival(arriving_train))
+
+  return sorted_arrivals
 
 
 def format_destination_station_name(stationName):
